@@ -48,8 +48,7 @@ const pool = new Pool({
 
 // Initialize OpenAI
 const client = new EuriClient({
-  apiKey:
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlM2NjYjY1OC03NjA2LTRmYTQtYTk3Zi05MmIxZjQ1M2Y4N2MiLCJwaG9uZSI6Iis5MTc5MDQ4ODE3MjMiLCJpYXQiOjE3NDY3NjIwOTcsImV4cCI6MTc3ODI5ODA5N30.v3n6NJAyjjX4VnQkM85vT8vmu8Qys2mHvgJY-R7QtaA",
+  apiKey: "",
 });
 // Example route to test server
 app.get("/api/health", (req: express.Request, res: express.Response): void => {
