@@ -46,10 +46,11 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT ?? "5434"),
 });
 
-// Initialize OpenAI
-const client = new EuriClient({
-  apiKey: "",
+// Initialize EuriClient with API key
+const euriClient = new EuriClient({
+  apiKey: process.env.EURI_API_KEY ?? "",
 });
+
 // Example route to test server
 app.get("/api/health", (req: express.Request, res: express.Response): void => {
   res.json({ status: "OK", message: "Server is running" });
@@ -64,51 +65,82 @@ app.post("/api/upload", upload.single("file"), async (req: express.Request, res:
     }
 
     const filePath = req.file.path;
+    const originalFileName = req.file.originalname.replace(/\.[^/.]+$/, ""); // Remove extension
 
     // Read Excel file
     const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+    const sheetNames = workbook.SheetNames;
 
-    // Try to get data with normal method first
-    const data = xlsx.utils.sheet_to_json(worksheet);
+    // Initialize components collection
+    const components: any[] = [];
 
-    // If no data rows, extract headers and create a dummy row
-    let processedData = data;
-    if (data.length === 0) {
-      console.log("No data found in Excel file, extracting headers only");
+    // Process each sheet
+    for (let i = 0; i < sheetNames.length; i++) {
+      const sheetName = sheetNames[i];
+      const worksheet = workbook.Sheets[sheetName];
 
-      // Get worksheet reference to determine range
-      const ref = worksheet["!ref"] || "A1";
-      const range = xlsx.utils.decode_range(ref);
+      // Try to get data with normal method first
+      const data = xlsx.utils.sheet_to_json(worksheet);
 
-      // Extract header row (first row)
-      const headers: string[] = [];
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellRef = xlsx.utils.encode_cell({ r: range.s.r, c: C });
-        const cell = worksheet[cellRef];
-        if (cell && cell.v) {
-          headers.push(cell.v.toString());
+      // If no data rows, extract headers and create a dummy row
+      let processedData = data;
+      if (data.length === 0) {
+        console.log(`No data found in sheet "${sheetName}", extracting headers only`);
+
+        // Get worksheet reference to determine range
+        const ref = worksheet["!ref"] || "A1";
+        const range = xlsx.utils.decode_range(ref);
+
+        // Extract header row (first row)
+        const headers: string[] = [];
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellRef = xlsx.utils.encode_cell({ r: range.s.r, c: C });
+          const cell = worksheet[cellRef];
+          if (cell && cell.v) {
+            headers.push(cell.v.toString());
+          }
+        }
+
+        console.log("Extracted headers:", headers);
+
+        // Create a dummy row with the headers as keys
+        if (headers.length > 0) {
+          const dummyRow: Record<string, null> = {};
+          headers.forEach((header) => {
+            dummyRow[header] = null;
+          });
+          processedData = [dummyRow];
         }
       }
 
-      console.log("Extracted headers:", headers);
+      // Generate schema using AI
+      const schema = await generateSchemaFromData(processedData);
 
-      // Create a dummy row with the headers as keys
-      if (headers.length > 0) {
-        const dummyRow: Record<string, null> = {};
-        headers.forEach((header) => {
-          dummyRow[header] = null;
-        });
-        processedData = [dummyRow];
-      }
+      // Create component key (sanitized sheet name)
+      const componentKey = sheetName.trim().replace(/\s+/g, '_').toLowerCase();
+
+      // Add to components collection
+      components.push({
+        key: componentKey,
+        title: sheetName,
+        schema_json: schema
+      });
     }
 
-    // Generate schema using AI
-    const schema = await generateSchemaFromData(processedData);
+    // Check if we have any components
+    if (components.length === 0) {
+      res.status(400).json({ error: "No valid sheets found in the Excel file" });
+      return;
+    }
 
-    // Return the schema
-    res.json({ success: true, schema });
+    // Return the extracted components for review in the UI
+    // Instead of saving directly to the database
+    res.status(200).json({
+      success: true,
+      fileName: originalFileName,
+      components: components
+    });
+
   } catch (error) {
     console.error("Error processing file:", error);
     res.status(500).json({ error: "Error processing file" });
@@ -165,10 +197,26 @@ app.post("/api/templates", async (req: express.Request, res: express.Response): 
     try {
       await client.query("BEGIN");
 
+      // Check if a template with this name already exists
+      const existingTemplate = await client.query(
+        "SELECT id FROM templates WHERE name = $1 AND is_deleted = FALSE",
+        [name]
+      );
+
+      if (existingTemplate.rows.length > 0) {
+        // Return a specific error for duplicate template name
+        await client.query("ROLLBACK");
+        res.status(409).json({
+          error: "Duplicate template name",
+          message: `A template with the name "${name}" already exists. Please choose a different name.`
+        });
+        return;
+      }
+
       // Create template
       const templateResult = await client.query(
         "INSERT INTO templates (name, description, created_by) VALUES ($1, $2, $3) RETURNING *",
-        [name, description, created_by]
+        [name, description, created_by ?? "00000000-0000-0000-0000-000000000000"]
       );
 
       const template = templateResult.rows[0];
@@ -190,7 +238,7 @@ app.post("/api/templates", async (req: express.Request, res: express.Response): 
         [
           template.id,
           "CREATE",
-          created_by,
+          created_by ?? "00000000-0000-0000-0000-000000000000",
           JSON.stringify({ snapshot: { template: { name, components: components.map((c: any) => c.key) } } }),
         ]
       );
@@ -209,9 +257,29 @@ app.post("/api/templates", async (req: express.Request, res: express.Response): 
     }
   } catch (error) {
     console.error("Error creating template:", error);
-    res.status(500).json({ error: "Error creating template" });
+    res.status(500).json({ error: "Error creating template", details: (error as Error).message });
   }
 });
+
+// Helper function to extract JSON from text
+function extractJsonFromText(text: string): string {
+  // Try to extract JSON from code block
+  const codeBlockRegex = /```(?:json)?\s*({[\s\S]*?})\s*```/;
+  const codeBlockMatch = codeBlockRegex.exec(text);
+  if (codeBlockMatch?.[1]) {
+    return codeBlockMatch[1];
+  }
+
+  // If no code block, try to find JSON object directly
+  const jsonRegex = /({[\s\S]*})/;
+  const jsonMatch = jsonRegex.exec(text);
+  if (jsonMatch?.[1]) {
+    return jsonMatch[1];
+  }
+
+  // Return original text if no JSON found
+  return text;
+}
 
 // Function to generate schema from data using AI
 async function generateSchemaFromData(data: any[]) {
@@ -223,11 +291,11 @@ async function generateSchemaFromData(data: any[]) {
     // For normal data, use sample rows and AI
     const sampleData = data.slice(0, Math.min(5, data.length));
 
-    // Create a prompt for OpenAI
+    // Create a prompt for the AI
     const prompt = `
       Generate a JSON Schema for the following data:
       ${JSON.stringify(sampleData, null, 2)}
-      
+
       The schema should follow this format:
        {
         type: "object",
@@ -236,23 +304,14 @@ async function generateSchemaFromData(data: any[]) {
         "field1": { "type": "string", "title": "Field 1" },
         "field2": { "type": "number", "title": "Field 2" }
       }
-      
+
       Detect appropriate data types, including strings, numbers, dates, and nested objects or arrays.
       Only output valid JSON.
-
-      The schema should strictly follow below format.
-      {
-        type: "object",
-        required: [],
-        properties: {
-        "field1": { "type": "string", "title": "Field 1" },
-        "field2": { "type": "number", "title": "Field 2" }
-      }
     `;
 
-    // Call OpenAI API
-    const completion = await client.createChatCompletion({
-      model: "gemini-2.5-pro-exp-03-25",
+    // Call EuriClient with Claude model
+    const completion = await euriClient.createChatCompletion({
+      model: "claude-3-5-sonnet-20240620",
       messages: [
         {
           role: "system",
@@ -262,31 +321,27 @@ async function generateSchemaFromData(data: any[]) {
         { role: "user", content: prompt },
       ],
       temperature: 0.2,
+      max_tokens: 4000
     });
 
     // Parse response to get the schema
     const content = completion.choices[0].message.content;
-    let schemaText = "";
-
-    // Handle content as array or string
-    if (Array.isArray(content)) {
-      // Array of content parts
-      schemaText = content.map((part) => (typeof part === "string" ? part : part.text || "")).join("");
-    } else {
-      // Direct string
-      schemaText = String(content || "");
+    if (!content) {
+      throw new Error("No content returned from AI model");
     }
 
-    // Extract JSON from code block
-    const jsonMatch = schemaText.match(/```(?:json)?\s*({[\s\S]*?})\s*```/);
-    if (jsonMatch && jsonMatch[1]) {
-      schemaText = jsonMatch[1];
+    // Handle both string and structured content formats
+    let schemaText: string;
+    if (typeof content === 'string') {
+      schemaText = extractJsonFromText(content);
     } else {
-      // If no code block, try to find JSON object directly
-      const potentialJson = schemaText.match(/({[\s\S]*})/);
-      if (potentialJson && potentialJson[1]) {
-        schemaText = potentialJson[1];
-      }
+      // Extract text from structured content
+      const textContent = content
+        .filter(item => item.type === 'text')
+        .map(item => item.text)
+        .join('\n');
+
+      schemaText = extractJsonFromText(textContent);
     }
 
     console.log("extracted json:", schemaText);
