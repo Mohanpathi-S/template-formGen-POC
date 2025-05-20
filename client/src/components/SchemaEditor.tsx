@@ -18,7 +18,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
-import axios from "axios";
+import { templateApi } from "../services/api";
 
 // Define types for schema and properties
 interface SchemaProperty {
@@ -290,9 +290,9 @@ const SchemaEditor = () => {
         components: components
       };
 
-      // Save template to the backend
-      const response = await axios.post("http://localhost:3001/api/templates", templateData);
-      console.log("Template saved:", response.data);
+      // Save template to the backend using the API service
+      const response = await templateApi.createTemplate(templateData);
+      console.log("Template saved:", response);
 
       setSnackbarOpen(true);
 
@@ -304,10 +304,10 @@ const SchemaEditor = () => {
       console.error("Error saving template:", err);
 
       // Check if it's a duplicate template name error
-      if (err.response && err.response.status === 409) {
-        setError(err.response.data.message ?? "A template with this name already exists. Please choose a different name.");
+      if (err.status === 409) {
+        setError(err.details?.message ?? "A template with this name already exists. Please choose a different name.");
       } else {
-        setError("Error saving template. Please try again.");
+        setError(err.message ?? "Error saving template. Please try again.");
       }
     } finally {
       setIsSaving(false);

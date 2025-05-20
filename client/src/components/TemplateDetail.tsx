@@ -4,15 +4,16 @@ import { Box, Typography, Paper, Tabs, Tab, Button, CircularProgress, Alert } fr
 import Form from "@rjsf/mui";
 import { RJSFSchema } from "@rjsf/utils";
 import validator from "@rjsf/validator-ajv8";
-import axios from "axios";
+import { templateApi } from "../services/api";
+import { Template, Component } from "../types";
 
 interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
+  readonly children?: React.ReactNode;
+  readonly index: number;
+  readonly value: number;
 }
 
-function TabPanel(props: TabPanelProps) {
+function TabPanel(props: Readonly<TabPanelProps>) {
   const { children, value, index, ...other } = props;
 
   return (
@@ -26,21 +27,6 @@ function TabPanel(props: TabPanelProps) {
       {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
     </div>
   );
-}
-
-interface Component {
-  id: string;
-  key: string;
-  title: string;
-  schema_json: RJSFSchema;
-  order_index: number;
-}
-
-interface Template {
-  id: string;
-  name: string;
-  description: string;
-  created_at: string;
 }
 
 const TemplateDetail = () => {
@@ -61,13 +47,19 @@ const TemplateDetail = () => {
   const fetchTemplate = async (templateId: string) => {
     try {
       setLoading(true);
-      const response = await axios.get(`http://localhost:3001/api/templates/${templateId}`);
-      setTemplate(response.data.template);
-      setComponents(response.data.components);
+
+      // Validate the ID (basic validation for UUID format)
+      if (!templateId || templateId.trim() === '') {
+        throw new Error('Template ID is required');
+      }
+
+      const data = await templateApi.getTemplateById(templateId);
+      setTemplate(data.template);
+      setComponents(data.components);
       setError(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching template:", err);
-      setError("Error loading template. Template may not exist or server error.");
+      setError(err.message ?? "Error loading template. Template may not exist or server error.");
     } finally {
       setLoading(false);
     }

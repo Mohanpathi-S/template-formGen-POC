@@ -1,15 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Box, Typography, Paper, List, ListItem, ListItemText, Button, Divider, CircularProgress } from "@mui/material";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
-
-interface Template {
-  id: string;
-  name: string;
-  description: string;
-  created_at: string;
-  created_by: string;
-}
+import { templateApi } from "../services/api";
+import { Template } from "../types";
 
 const TemplateList = () => {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -24,12 +17,12 @@ const TemplateList = () => {
   const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const response = await axios.get("http://localhost:3001/api/templates");
-      setTemplates(response.data);
+      const templates = await templateApi.getAllTemplates();
+      setTemplates(templates);
       setError(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching templates:", err);
-      setError("Error loading templates. Please try again later.");
+      setError(err.message ?? "Error loading templates. Please try again later.");
     } finally {
       setLoading(false);
     }
@@ -91,9 +84,8 @@ const TemplateList = () => {
             {templates.map((template, index) => (
               <React.Fragment key={template.id}>
                 <ListItem
-                  button
                   onClick={() => handleViewTemplate(template.id)}
-                  sx={{ py: 2, px: 3, "&:hover": { bgcolor: "#f5f5f5" } }}
+                  sx={{ py: 2, px: 3, "&:hover": { bgcolor: "#f5f5f5" }, cursor: "pointer" }}
                 >
                   <ListItemText
                     primary={template.name}

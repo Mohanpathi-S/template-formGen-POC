@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Box, Button, Typography, CircularProgress, Alert, Paper } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { uploadApi } from "../services/api";
 
 const FileUpload = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -34,24 +34,18 @@ const FileUpload = () => {
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await axios.post("http://localhost:3001/api/upload", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
+      // Use the uploadApi service to upload the file
+      const response = await uploadApi.uploadExcelFile(file);
 
       // Store the extracted components and file name in session storage
-      sessionStorage.setItem("uploadedFileName", response.data.fileName);
-      sessionStorage.setItem("extractedComponents", JSON.stringify(response.data.components));
+      sessionStorage.setItem("uploadedFileName", response.fileName);
+      sessionStorage.setItem("extractedComponents", JSON.stringify(response.components));
 
       // Navigate to schema editor for review and confirmation
       navigate("/schema-editor");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error uploading file:", err);
-      setError("Error uploading file. Please try again.");
+      setError(err.message ?? "Error uploading file. Please try again.");
     } finally {
       setLoading(false);
     }

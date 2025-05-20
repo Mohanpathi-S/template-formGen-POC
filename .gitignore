@@ -65,3 +65,4 @@ server/uploads/*
 *.tmp
 *.temp
 .vercel
+uploads
