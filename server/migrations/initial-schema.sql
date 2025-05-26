@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS component_schemas (
   key VARCHAR(255) NOT NULL,
   title VARCHAR(255) NOT NULL,
   schema_json JSONB NOT NULL,
+  subcomponents JSONB,
   order_index INTEGER NOT NULL,
   is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -36,4 +37,5 @@ CREATE TABLE IF NOT EXISTS template_audit_logs (
 CREATE INDEX IF NOT EXISTS idx_component_schemas_template_id ON component_schemas(template_id);
 CREATE INDEX IF NOT EXISTS idx_template_audit_logs_template_id ON template_audit_logs(template_id);
 CREATE INDEX IF NOT EXISTS idx_templates_is_deleted ON templates(is_deleted);
-CREATE INDEX IF NOT EXISTS idx_component_schemas_is_deleted ON component_schemas(is_deleted); 
+CREATE INDEX IF NOT EXISTS idx_component_schemas_is_deleted ON component_schemas(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_component_schemas_subcomponents ON component_schemas USING gin(subcomponents); 

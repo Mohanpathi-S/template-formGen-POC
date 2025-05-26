@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Box, Typography, Paper, Tabs, Tab, Button, CircularProgress, Alert } from "@mui/material";
+import { Box, Typography, Paper, Tabs, Tab, Button, CircularProgress, Alert, Radio, RadioGroup, FormControlLabel, FormLabel } from "@mui/material";
 import Form from "@rjsf/mui";
 import { RJSFSchema } from "@rjsf/utils";
 import validator from "@rjsf/validator-ajv8";
@@ -37,6 +37,7 @@ const TemplateDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tabValue, setTabValue] = useState(0);
+  const [activeSubComponent, setActiveSubComponent] = useState(0);
 
   useEffect(() => {
     if (id) {
@@ -67,6 +68,19 @@ const TemplateDetail = () => {
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+    setActiveSubComponent(0); // Reset subcomponent selection when switching tabs
+  };
+
+  // Helper function to get the current active schema
+  const getCurrentSchema = (): RJSFSchema | null => {
+    const component = components[tabValue];
+    if (!component) return null;
+
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      return component.subcomponents[activeSubComponent]?.schema_json || null;
+    }
+    
+    return component.schema_json;
   };
 
   const handleBackToList = () => {
@@ -136,15 +150,57 @@ const TemplateDetail = () => {
               <Box sx={{ p: 2 }}>
                 <Typography variant="h6" gutterBottom>
                   Form Preview
+                  {component.subcomponents && component.subcomponents.length > 0 && (
+                    <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 1 }}>
+                      - {component.subcomponents[activeSubComponent]?.title}
+                    </Typography>
+                  )}
                 </Typography>
-                <Form
-                  schema={component.schema_json}
-                  validator={validator}
-                  formData={{}}
-                  readonly
-                  disabled
-                  liveValidate
-                />
+
+                {/* Subcomponent radio buttons */}
+                {component.subcomponents && component.subcomponents.length > 0 && (
+                  <Box sx={{ mb: 3 }}>
+                    <FormLabel component="legend" sx={{ mb: 2 }}>
+                      Select Subcomponent:
+                    </FormLabel>
+                    <RadioGroup
+                      row
+                      value={activeSubComponent}
+                      onChange={(e) => setActiveSubComponent(parseInt(e.target.value))}
+                    >
+                      {component.subcomponents.map((subComponent, subIndex) => (
+                        <FormControlLabel
+                          key={subComponent.key}
+                          value={subIndex}
+                          control={<Radio />}
+                          label={subComponent.title}
+                        />
+                      ))}
+                    </RadioGroup>
+                  </Box>
+                )}
+
+                {(() => {
+                  const currentSchema = getCurrentSchema();
+                  if (!currentSchema) {
+                    return (
+                      <Typography variant="body2" color="text.secondary">
+                        No schema found for this component.
+                      </Typography>
+                    );
+                  }
+
+                  return (
+                    <Form
+                      schema={currentSchema}
+                      validator={validator}
+                      formData={{}}
+                      readonly
+                      disabled
+                      liveValidate
+                    />
+                  );
+                })()}
               </Box>
             </TabPanel>
           ))}

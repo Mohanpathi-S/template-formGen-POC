@@ -19,6 +19,7 @@ CREATE TABLE component_schemas (
   key              TEXT NOT NULL,           -- e.g. 'surveyDetails', 'detectionFugitive'
   title            TEXT NOT NULL,           -- human-friendly title
   schema_json      JSONB NOT NULL,          -- full JSONSchema for this component
+  subcomponents    JSONB,                   -- array of subcomponents with their own schemas
   order_index      INT NOT NULL DEFAULT 0,
   created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   updated_at       TIMESTAMP WITH TIME ZONE,

@@ -8,6 +8,7 @@
     "migrate:up": "node-pg-migrate up",
     "migrate:down": "node-pg-migrate down",
     "migrate:create": "node-pg-migrate create",
+    "migrate:reset": "node-pg-migrate down --count 100",
     "db:migrate": "docker exec -i postgres psql -U postgres -d template_generator -f - < migrations/initial-schema.sql",
     "start": "ts-node src/server.ts",
     "dev": "nodemon --exec ts-node src/server.ts"

@@ -14,6 +14,10 @@ import {
   IconButton,
   Alert,
   Snackbar,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
+  FormLabel,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -45,34 +49,31 @@ interface Schema {
   };
 }
 
-interface Component {
+interface SubComponent {
   key: string;
   title: string;
   schema_json: Schema;
 }
 
+interface Component {
+  key: string;
+  title: string;
+  schema_json: Schema;
+  subcomponents?: SubComponent[];
+}
+
 const SchemaEditor = () => {
   const [components, setComponents] = useState<Component[]>([]);
   const [activeComponent, setActiveComponent] = useState<number>(0);
+  const [activeSubComponent, setActiveSubComponent] = useState<number>(0);
   const [templateName, setTemplateName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Load components from session storage
-    const extractedComponents = sessionStorage.getItem("extractedComponents");
-    const fileName = sessionStorage.getItem("uploadedFileName");
-
-    if (extractedComponents) {
-      try {
-        const parsedComponents = JSON.parse(extractedComponents) as Component[];
-
-        // Process each component's schema
-        const processedComponents = parsedComponents.map(component => {
-          let schema = component.schema_json;
-
+  // Helper function to process schema properties
+  const processSchema = (schema: Schema): Schema => {
           // Handle array schemas by converting them to object schemas
           if (schema.type === "array" && schema.items?.properties) {
             // Convert array schema to object schema for editor
@@ -118,10 +119,46 @@ const SchemaEditor = () => {
             }
           });
 
-          return {
+    return schema;
+  };
+
+  // Helper function to get the current active schema
+  const getCurrentSchema = (): Schema | null => {
+    const component = components[activeComponent];
+    if (!component) return null;
+
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      return component.subcomponents[activeSubComponent]?.schema_json || null;
+    }
+    
+    return component.schema_json;
+  };
+
+  useEffect(() => {
+    // Load components from session storage
+    const extractedComponents = sessionStorage.getItem("extractedComponents");
+    const fileName = sessionStorage.getItem("uploadedFileName");
+
+    if (extractedComponents) {
+      try {
+        const parsedComponents = JSON.parse(extractedComponents) as Component[];
+
+        // Process each component's schema
+        const processedComponents = parsedComponents.map(component => {
+          const processedComponent = {
             ...component,
-            schema_json: schema
+            schema_json: processSchema(component.schema_json)
           };
+
+          // Process subcomponents if they exist
+          if (component.subcomponents && component.subcomponents.length > 0) {
+            processedComponent.subcomponents = component.subcomponents.map(subComponent => ({
+              ...subComponent,
+              schema_json: processSchema(subComponent.schema_json)
+            }));
+          }
+
+          return processedComponent;
         });
 
         setComponents(processedComponents);
@@ -144,12 +181,52 @@ const SchemaEditor = () => {
 
     const updatedComponents = [...components];
     const component = { ...updatedComponents[componentIndex] };
-    const schema = { ...component.schema_json };
+    
+    // Determine if we're editing a subcomponent or main component
+    let targetSchema: Schema;
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      // Editing subcomponent
+      const subcomponents = [...component.subcomponents];
+      const subComponent = { ...subcomponents[activeSubComponent] };
+      targetSchema = { ...subComponent.schema_json };
+      
+      // Ensure schema has properties
+      targetSchema.properties ??= {};
+      
+      const property = { ...targetSchema.properties[propertyKey] };
+      
+      // Update property type and remove format if changing from string
+      property.type = newType;
+      
+      // Remove format if not a string
+      if (newType !== "string") {
+        delete property.format;
+      }
+      
+      // Add items property if array
+      if (newType === "array") {
+        property.items = { type: "string" };
+      } else {
+        delete property.items;
+      }
+      
+      // Remove enum if not string or array
+      if (newType !== "string" && newType !== "array") {
+        delete property.enum;
+      }
+      
+      targetSchema.properties[propertyKey] = property;
+      subComponent.schema_json = targetSchema;
+      subcomponents[activeSubComponent] = subComponent;
+      component.subcomponents = subcomponents;
+    } else {
+      // Editing main component
+      targetSchema = { ...component.schema_json };
 
     // Ensure schema has properties
-    schema.properties ??= {};
+      targetSchema.properties ??= {};
 
-    const property = { ...schema.properties[propertyKey] };
+      const property = { ...targetSchema.properties[propertyKey] };
 
     // Update property type and remove format if changing from string
     property.type = newType;
@@ -171,8 +248,10 @@ const SchemaEditor = () => {
       delete property.enum;
     }
 
-    schema.properties[propertyKey] = property;
-    component.schema_json = schema;
+      targetSchema.properties[propertyKey] = property;
+      component.schema_json = targetSchema;
+    }
+    
     updatedComponents[componentIndex] = component;
     setComponents(updatedComponents);
   };
@@ -182,6 +261,27 @@ const SchemaEditor = () => {
 
     const updatedComponents = [...components];
     const component = { ...updatedComponents[componentIndex] };
+    
+    // Determine if we're editing a subcomponent or main component
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      // Editing subcomponent
+      const subcomponents = [...component.subcomponents];
+      const subComponent = { ...subcomponents[activeSubComponent] };
+      const schema = { ...subComponent.schema_json };
+      
+      // Ensure schema has properties
+      schema.properties ??= {};
+      
+      schema.properties[propertyKey] = {
+        ...schema.properties[propertyKey],
+        title: newTitle,
+      };
+      
+      subComponent.schema_json = schema;
+      subcomponents[activeSubComponent] = subComponent;
+      component.subcomponents = subcomponents;
+    } else {
+      // Editing main component
     const schema = { ...component.schema_json };
 
     // Ensure schema has properties
@@ -193,6 +293,8 @@ const SchemaEditor = () => {
     };
 
     component.schema_json = schema;
+    }
+    
     updatedComponents[componentIndex] = component;
     setComponents(updatedComponents);
   };
@@ -202,6 +304,27 @@ const SchemaEditor = () => {
 
     const updatedComponents = [...components];
     const component = { ...updatedComponents[componentIndex] };
+    
+    // Determine if we're editing a subcomponent or main component
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      // Editing subcomponent
+      const subcomponents = [...component.subcomponents];
+      const subComponent = { ...subcomponents[activeSubComponent] };
+      const schema = { ...subComponent.schema_json };
+      
+      // Ensure schema has properties
+      schema.properties ??= {};
+      
+      schema.properties[propertyKey] = {
+        ...schema.properties[propertyKey],
+        format: newFormat || undefined,
+      };
+      
+      subComponent.schema_json = schema;
+      subcomponents[activeSubComponent] = subComponent;
+      component.subcomponents = subcomponents;
+    } else {
+      // Editing main component
     const schema = { ...component.schema_json };
 
     // Ensure schema has properties
@@ -213,6 +336,8 @@ const SchemaEditor = () => {
     };
 
     component.schema_json = schema;
+    }
+    
     updatedComponents[componentIndex] = component;
     setComponents(updatedComponents);
   };
@@ -222,6 +347,24 @@ const SchemaEditor = () => {
 
     const updatedComponents = [...components];
     const component = { ...updatedComponents[componentIndex] };
+    
+    // Determine if we're editing a subcomponent or main component
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      // Editing subcomponent
+      const subcomponents = [...component.subcomponents];
+      const subComponent = { ...subcomponents[activeSubComponent] };
+      const schema = { ...subComponent.schema_json };
+      
+      // Ensure schema has properties
+      schema.properties ??= {};
+      
+      delete schema.properties[propertyKey];
+      
+      subComponent.schema_json = schema;
+      subcomponents[activeSubComponent] = subComponent;
+      component.subcomponents = subcomponents;
+    } else {
+      // Editing main component
     const schema = { ...component.schema_json };
 
     // Ensure schema has properties
@@ -230,6 +373,8 @@ const SchemaEditor = () => {
     delete schema.properties[propertyKey];
 
     component.schema_json = schema;
+    }
+    
     updatedComponents[componentIndex] = component;
     setComponents(updatedComponents);
   };
@@ -239,6 +384,28 @@ const SchemaEditor = () => {
 
     const updatedComponents = [...components];
     const component = { ...updatedComponents[componentIndex] };
+    
+    // Determine if we're editing a subcomponent or main component
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      // Editing subcomponent
+      const subcomponents = [...component.subcomponents];
+      const subComponent = { ...subcomponents[activeSubComponent] };
+      const schema = { ...subComponent.schema_json };
+      
+      // Ensure schema has properties
+      schema.properties ??= {};
+      
+      const newPropertyKey = `newProperty${Object.keys(schema.properties).length}`;
+      schema.properties[newPropertyKey] = {
+        type: "string",
+        title: "New Property",
+      };
+      
+      subComponent.schema_json = schema;
+      subcomponents[activeSubComponent] = subComponent;
+      component.subcomponents = subcomponents;
+    } else {
+      // Editing main component
     const schema = { ...component.schema_json };
 
     // Ensure schema has properties
@@ -251,6 +418,8 @@ const SchemaEditor = () => {
     };
 
     component.schema_json = schema;
+    }
+    
     updatedComponents[componentIndex] = component;
     setComponents(updatedComponents);
   };
@@ -372,7 +541,10 @@ const SchemaEditor = () => {
               <Button
                 key={component.key}
                 variant={activeComponent === index ? "contained" : "outlined"}
-                onClick={() => setActiveComponent(index)}
+                onClick={() => {
+                  setActiveComponent(index);
+                  setActiveSubComponent(0); // Reset subcomponent selection when switching components
+                }}
                 sx={{ mr: 1, mb: 1, textTransform: 'none' }}
               >
                 {component.title}
@@ -398,11 +570,49 @@ const SchemaEditor = () => {
           />
         </Box>
 
+        {/* Subcomponent radio buttons */}
+        {currentComponent.subcomponents && currentComponent.subcomponents.length > 0 && (
+          <Box sx={{ mb: 3 }}>
+            <FormLabel component="legend" sx={{ mb: 2 }}>
+              Select Subcomponent to Edit:
+            </FormLabel>
+            <RadioGroup
+              row
+              value={activeSubComponent}
+              onChange={(e) => setActiveSubComponent(parseInt(e.target.value))}
+            >
+              {currentComponent.subcomponents.map((subComponent, index) => (
+                <FormControlLabel
+                  key={subComponent.key}
+                  value={index}
+                  control={<Radio />}
+                  label={subComponent.title}
+                />
+              ))}
+            </RadioGroup>
+          </Box>
+        )}
+
         <Typography variant="h6" gutterBottom>
           Properties
+          {currentComponent.subcomponents && currentComponent.subcomponents.length > 0 && (
+            <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 1 }}>
+              (Editing: {currentComponent.subcomponents[activeSubComponent]?.title})
+            </Typography>
+          )}
         </Typography>
 
-        {currentComponent.schema_json.properties && Object.entries(currentComponent.schema_json.properties).map(([key, property]) => (
+        {(() => {
+          const currentSchema = getCurrentSchema();
+          if (!currentSchema || !currentSchema.properties) {
+            return (
+              <Typography variant="body2" color="text.secondary">
+                No properties found for this component.
+              </Typography>
+            );
+          }
+
+          return Object.entries(currentSchema.properties).map(([key, property]) => (
           <Paper key={key} sx={{ p: 2, mb: 2, bgcolor: "#f9f9f9" }}>
             <Grid container spacing={2} alignItems="center">
               <Grid item xs={12} sm={3}>
@@ -466,7 +676,8 @@ const SchemaEditor = () => {
               </Grid>
             </Grid>
           </Paper>
-        ))}
+          ));
+        })()}
 
         <Button
           variant="outlined"

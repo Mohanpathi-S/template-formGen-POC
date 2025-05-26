@@ -1,20 +1,28 @@
 import React, { useState, useEffect } from "react";
-import { Box, Paper, Typography, Button, Alert, Snackbar } from "@mui/material";
+import { Box, Paper, Typography, Button, Alert, Snackbar, Radio, RadioGroup, FormControlLabel, FormLabel } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import Form from "@rjsf/mui";
 import { RJSFSchema } from "@rjsf/utils";
 import validator from "@rjsf/validator-ajv8";
 import axios from "axios";
 
-interface Component {
+interface SubComponent {
   key: string;
   title: string;
   schema_json: RJSFSchema;
 }
 
+interface Component {
+  key: string;
+  title: string;
+  schema_json: RJSFSchema;
+  subcomponents?: SubComponent[];
+}
+
 const FormRenderer = () => {
   const [components, setComponents] = useState<Component[]>([]);
   const [activeTab, setActiveTab] = useState(0);
+  const [activeSubComponent, setActiveSubComponent] = useState(0);
   const [templateName, setTemplateName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
@@ -29,36 +37,39 @@ const FormRenderer = () => {
     if (savedComponents && savedTemplateName) {
       try {
         const parsedComponents = JSON.parse(savedComponents) as Component[];
-
         // Process components to ensure they have the right format for the form renderer
         const processedComponents = parsedComponents.map(component => {
-          let schema = component.schema_json;
+          const processedComponent = {
+            ...component,
+            schema_json: processSchema(component.schema_json)
+          };
 
-          // Handle array schemas by converting them to object schemas
-          if (schema.type === "array" && schema.items && typeof schema.items === 'object' && 'properties' in schema.items) {
-            // Convert array schema to object schema for form renderer
-            schema = {
-              type: "object",
-              properties: schema.items.properties
-            };
+          // Process subcomponents if they exist
+          if (component.subcomponents && component.subcomponents.length > 0) {
+            processedComponent.subcomponents = component.subcomponents.map(subComponent => ({
+              ...subComponent,
+              schema_json: processSchema(subComponent.schema_json)
+            }));
           }
 
-          // Ensure schema has properties
-          schema.properties ??= {};
-
-          return {
-            ...component,
-            schema_json: schema
-          };
+          return processedComponent;
         });
 
         setComponents(processedComponents);
         setTemplateName(savedTemplateName);
 
-        // Initialize form data for each component
+        // Initialize form data for each component and subcomponent
         const initialFormData: Record<string, any> = {};
         processedComponents.forEach((component: Component) => {
-          initialFormData[component.key] = {};
+          if (component.subcomponents && component.subcomponents.length > 0) {
+            // Initialize form data for each subcomponent
+            component.subcomponents.forEach((subComponent: SubComponent) => {
+              initialFormData[subComponent.key] = {};
+            });
+          } else {
+            // Initialize form data for main component
+            initialFormData[component.key] = {};
+          }
         });
         setFormData(initialFormData);
       } catch (err) {
@@ -70,11 +81,59 @@ const FormRenderer = () => {
     }
   }, []);
 
+  // Helper function to process schema properties
+  const processSchema = (schema: RJSFSchema): RJSFSchema => {
+    // Handle array schemas by converting them to object schemas
+    if (schema.type === "array" && schema.items && typeof schema.items === 'object' && 'properties' in schema.items) {
+      // Convert array schema to object schema for form renderer
+      schema = {
+        type: "object",
+        properties: schema.items.properties
+      };
+    }
+
+    // Ensure schema has properties
+    schema.properties ??= {};
+
+    return schema;
+  };
+
   const handleFormChange = (componentIndex: number, data: any) => {
     const updatedFormData = { ...formData };
-    const componentKey = components[componentIndex].key;
-    updatedFormData[componentKey] = data.formData;
+    const component = components[componentIndex];
+    
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      // Update form data for active subcomponent
+      const subComponentKey = component.subcomponents[activeSubComponent].key;
+      updatedFormData[subComponentKey] = data.formData;
+    } else {
+      // Update form data for main component
+      const componentKey = component.key;
+      updatedFormData[componentKey] = data.formData;
+    }
+    
     setFormData(updatedFormData);
+  };
+
+  // Helper function to get current active schema and form data
+  const getCurrentSchemaAndData = () => {
+    const component = components[activeTab];
+    if (!component) return { schema: null, data: {}, key: '' };
+
+    if (component.subcomponents && component.subcomponents.length > 0) {
+      const subComponent = component.subcomponents[activeSubComponent];
+      return {
+        schema: subComponent.schema_json,
+        data: formData[subComponent.key] || {},
+        key: subComponent.key
+      };
+    }
+    
+    return {
+      schema: component.schema_json,
+      data: formData[component.key] || {},
+      key: component.key
+    };
   };
 
   const handleSubmit = async () => {
@@ -160,7 +219,10 @@ const FormRenderer = () => {
             <Button
               key={component.key}
               variant={activeTab === index ? "contained" : "outlined"}
-              onClick={() => setActiveTab(index)}
+              onClick={() => {
+                setActiveTab(index);
+                setActiveSubComponent(0); // Reset subcomponent selection when switching components
+              }}
               sx={{ mr: 1, mb: 1, textTransform: 'none' }}
             >
               {component.title}
@@ -171,20 +233,70 @@ const FormRenderer = () => {
 
       {/* Current component form */}
       <Paper sx={{ p: 3, mt: 3, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>
-          {components[activeTab].title}
-        </Typography>
+        {(() => {
+          const currentComponent = components[activeTab];
+          const hasSubcomponents = currentComponent.subcomponents && currentComponent.subcomponents.length > 0;
+          
+          return (
+            <>
+              <Typography variant="h6" gutterBottom>
+                {currentComponent.title}
+                {hasSubcomponents && currentComponent.subcomponents && (
+                  <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 1 }}>
+                    - {currentComponent.subcomponents[activeSubComponent]?.title}
+                  </Typography>
+                )}
+              </Typography>
 
-        <Form
-          schema={components[activeTab].schema_json}
-          validator={validator}
-          formData={formData[components[activeTab].key]}
-          onChange={(data) => handleFormChange(activeTab, data)}
-          liveValidate
-        >
-          {/* Empty children to hide the submit button */}
-          <div></div>
-        </Form>
+              {/* Subcomponent radio buttons */}
+              {components[activeTab]?.subcomponents && components[activeTab].subcomponents!.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <FormLabel component="legend" sx={{ mb: 2 }}>
+                    Select Subcomponent:
+                  </FormLabel>
+                  <RadioGroup
+                    row
+                    value={activeSubComponent}
+                    onChange={(e) => setActiveSubComponent(parseInt(e.target.value))}
+                  >
+                    {components[activeTab].subcomponents!.map((subComponent, index) => (
+                      <FormControlLabel
+                        key={subComponent.key}
+                        value={index}
+                        control={<Radio />}
+                        label={subComponent.title}
+                      />
+                    ))}
+                  </RadioGroup>
+                </Box>
+              )}
+            </>
+          );
+        })()}
+
+        {(() => {
+          const { schema, data } = getCurrentSchemaAndData();
+          if (!schema) {
+            return (
+              <Typography variant="body2" color="text.secondary">
+                No schema found for this component.
+              </Typography>
+            );
+          }
+
+          return (
+            <Form
+              schema={schema}
+              validator={validator}
+              formData={data}
+              onChange={(data) => handleFormChange(activeTab, data)}
+              liveValidate
+            >
+              {/* Empty children to hide the submit button */}
+              <div></div>
+            </Form>
+          );
+        })()}
       </Paper>
 
       <Box sx={{ display: "flex", justifyContent: "space-between" }}>

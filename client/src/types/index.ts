@@ -18,6 +18,15 @@ export interface Template {
 }
 
 /**
+ * SubComponent interface representing a subcomponent within a component
+ */
+export interface SubComponent {
+  key: string;
+  title: string;
+  schema_json: Record<string, any>;
+}
+
+/**
  * Component interface representing a component schema from the API
  */
 export interface Component {
@@ -26,6 +35,7 @@ export interface Component {
   key: string;
   title: string;
   schema_json: Record<string, any>;
+  subcomponents?: SubComponent[];
   order_index: number;
   is_deleted: boolean;
   created_at: string;
@@ -57,6 +67,7 @@ export interface CreateComponentDto {
   key: string;
   title: string;
   schema_json: Record<string, any>;
+  subcomponents?: SubComponent[];
 }
 
 /**

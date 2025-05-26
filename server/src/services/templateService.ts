@@ -52,9 +52,35 @@ export async function getTemplateById(id: string): Promise<TemplateWithComponent
       [id]
     );
 
+    // Parse subcomponents from JSONB
+    const components = componentsResult.rows.map((component: any) => {
+      let subcomponents = undefined;
+      
+      if (component.subcomponents) {
+        try {
+          if (typeof component.subcomponents === 'string') {
+            subcomponents = JSON.parse(component.subcomponents);
+          } else if (Array.isArray(component.subcomponents)) {
+            subcomponents = component.subcomponents;
+          } else {
+            console.warn(`Unexpected subcomponents type for component ${component.id}:`, typeof component.subcomponents);
+            subcomponents = undefined;
+          }
+        } catch (parseError) {
+          console.error(`Error parsing subcomponents for component ${component.id}:`, parseError);
+          subcomponents = undefined;
+        }
+      }
+      
+      return {
+        ...component,
+        subcomponents
+      };
+    });
+
     return {
       template: templateResult.rows[0],
-      components: componentsResult.rows,
+      components: components,
     };
   } catch (error) {
     if (error instanceof AppError) {
@@ -105,8 +131,15 @@ export async function createTemplate(templateData: CreateTemplateDto): Promise<T
     // Create components
     const componentPromises = components.map(async (component, index) => {
       const result = await client.query(
-        "INSERT INTO component_schemas (template_id, key, title, schema_json, order_index) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-        [template.id, component.key, component.title, component.schema_json, index]
+        "INSERT INTO component_schemas (template_id, key, title, schema_json, subcomponents, order_index) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+        [
+          template.id, 
+          component.key, 
+          component.title, 
+          component.schema_json, 
+          component.subcomponents ? JSON.stringify(component.subcomponents) : null,
+          index
+        ]
       );
       return result.rows[0];
     });

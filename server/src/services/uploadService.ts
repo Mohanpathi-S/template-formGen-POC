@@ -6,11 +6,29 @@
  */
 import * as xlsx from "xlsx";
 import { generateSchemaFromData } from "./schemaGeneratorService";
-import { CreateComponentDto } from "../types";
+import { CreateComponentDto, SubComponent } from "../types";
 import { AppError } from "../middleware";
 
 /**
- * Process an Excel file and extract components
+ * Extract base name from sheet name for grouping
+ * @param {string} sheetName - The sheet name
+ * @returns {string} The base name for grouping
+ */
+function extractBaseName(sheetName: string): string {
+  // Remove common separators and suffixes to find base name
+  // Examples: "sheet 1 - one" -> "sheet 1", "Sheet1_Part1" -> "Sheet1", "Data (1)" -> "Data"
+  const cleaned = sheetName
+    .replace(/\s*[-_]\s*.+$/i, '') // Remove everything after - or _
+    .replace(/\s*\(.+\)$/i, '') // Remove everything in parentheses
+    .replace(/\s*part\s*\d+$/i, '') // Remove "part X" suffix
+    .replace(/\s*\d+$/i, '') // Remove trailing numbers
+    .trim();
+  
+  return cleaned || sheetName; // Fallback to original name if cleaning results in empty string
+}
+
+/**
+ * Process an Excel file and extract components with subcomponents
  * @param {string} filePath - Path to the uploaded file
  * @param {string} originalFileName - Original name of the file
  * @returns {Promise<{fileName: string, components: CreateComponentDto[]}>} Extracted components
@@ -27,10 +45,10 @@ export async function processExcelFile(
     const workbook = xlsx.readFile(filePath);
     const sheetNames = workbook.SheetNames;
 
-    // Initialize components collection
-    const components: CreateComponentDto[] = [];
+    // Group sheets by base name
+    const sheetGroups: Map<string, { name: string; data: any[] }[]> = new Map();
 
-    // Process each sheet
+    // Process each sheet and group them
     for (let i = 0; i < sheetNames.length; i++) {
       const sheetName = sheetNames[i];
       const worksheet = workbook.Sheets[sheetName];
@@ -69,18 +87,61 @@ export async function processExcelFile(
         }
       }
 
-      // Generate schema using AI
-      const schema = await generateSchemaFromData(processedData);
+      // Extract base name for grouping
+      const baseName = extractBaseName(sheetName);
+      
+      // Add to appropriate group
+      if (!sheetGroups.has(baseName)) {
+        sheetGroups.set(baseName, []);
+      }
+      
+      sheetGroups.get(baseName)!.push({
+        name: sheetName,
+        data: processedData
+      });
+    }
 
-      // Create component key (sanitized sheet name)
-      const componentKey = sheetName.trim().replace(/\s+/g, '_').toLowerCase();
+    // Initialize components collection
+    const components: CreateComponentDto[] = [];
 
-      // Add to components collection
+    // Process each group
+    for (const [baseName, sheets] of sheetGroups) {
+      if (sheets.length === 1) {
+        // Single sheet - create a regular component
+        const sheet = sheets[0];
+        const schema = await generateSchemaFromData(sheet.data);
+        const componentKey = sheet.name.trim().replace(/\s+/g, '_').toLowerCase();
+
       components.push({
         key: componentKey,
-        title: sheetName,
+          title: sheet.name,
+          schema_json: schema
+        });
+      } else {
+        // Multiple sheets with same base name - create component with subcomponents
+        const subcomponents: SubComponent[] = [];
+        
+        for (const sheet of sheets) {
+          const schema = await generateSchemaFromData(sheet.data);
+          const subComponentKey = sheet.name.trim().replace(/\s+/g, '_').toLowerCase();
+          
+          subcomponents.push({
+            key: subComponentKey,
+            title: sheet.name,
         schema_json: schema
       });
+        }
+
+        // Create the main component with subcomponents
+        const componentKey = baseName.trim().replace(/\s+/g, '_').toLowerCase();
+        
+        components.push({
+          key: componentKey,
+          title: baseName,
+          schema_json: subcomponents[0].schema_json, // Use first subcomponent's schema as default
+          subcomponents: subcomponents
+        });
+      }
     }
 
     // Check if we have any components
